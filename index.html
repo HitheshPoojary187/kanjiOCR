@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kanji Extractor with Romaji Pronunciation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://unpkg.com/wanakana@5.0.1/wanakana.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    .kanji-font {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
+  <!-- Header -->
+  <div class="bg-white shadow-sm border-b border-slate-200">
+    <div class="max-w-4xl mx-auto px-4 py-6">
+      <div class="flex items-center space-x-3">
+        <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-3 rounded-xl shadow-lg">
+          <i class="fas fa-language text-white text-xl"></i>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Kanji Extractor</h1>
+          <p class="text-gray-600 text-sm">Extract and analyze Japanese characters with AI-powered OCR</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <!-- Upload Section -->
+    <div class="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 mb-8">
+      <div class="text-center">
+        <div class="mb-6">
+          <div class="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-full mb-4">
+            <i class="fas fa-cloud-upload-alt text-3xl text-blue-600"></i>
+          </div>
+          <h2 class="text-2xl font-semibold text-gray-900 mb-2">Upload Your Image</h2>
+          <p class="text-gray-600 mb-6">Select an image containing Japanese text to extract and analyze kanji characters</p>
+        </div>
+        
+        <div class="space-y-4">
+          <div class="relative">
+            <input 
+              type="file" 
+              id="imageInput" 
+              accept="image/*" 
+              class="hidden"
+            >
+            <label 
+              for="imageInput" 
+              class="cursor-pointer inline-flex items-center justify-center px-8 py-4 bg-gradient-to-r from-slate-100 to-slate-200 hover:from-slate-200 hover:to-slate-300 border-2 border-dashed border-slate-300 hover:border-slate-400 rounded-xl transition-all duration-200 text-slate-700 hover:text-slate-800 font-medium min-w-64"
+            >
+              <i class="fas fa-image mr-3 text-lg"></i>
+              <span id="fileLabel">Choose Image File</span>
+            </label>
+          </div>
+          
+          <button 
+            onclick="processImage()" 
+            id="extractBtn"
+            disabled
+            class="inline-flex items-center justify-center px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 min-w-64"
+          >
+            <i class="fas fa-magic mr-3"></i>
+            Extract Kanji
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output Section -->
+    <div id="output" class="space-y-6"></div>
+  </div>
+
+  <script>
+    // --- Translator logic (from workspace, adapted) ---
+    var API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:5000' : '';
+    var _wanakanaLoading = null;
+    
+    function loadScript(src) {
+      return new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src; s.async = true; s.onload = resolve; s.onerror = reject; document.head.appendChild(s);
+      });
+    }
+    
+    async function ensureWanakana() {
+      if (window.wanakana) return;
+      if (_wanakanaLoading) { await _wanakanaLoading; return; }
+      var cdnPrimary = 'https://cdn.jsdelivr.net/npm/wanakana@5.1.0/umd/wanakana.min.js';
+      var cdnFallback = 'https://unpkg.com/wanakana@5.1.0/umd/wanakana.min.js';
+      _wanakanaLoading = (async function () {
+        try { await loadScript(cdnPrimary); }
+        catch (_) { try { await loadScript(cdnFallback); } catch (e) { } }
+      })();
+      await _wanakanaLoading;
+    }
+    
+    async function translateText(text, inputType = 'japanese') {
+      await ensureWanakana();
+      if (!text || !text.trim()) return null;
+      
+      var sendText = text;
+      if (inputType === 'romanji' && window.wanakana) {
+        sendText = window.wanakana.toHiragana(text);
+      }
+      
+      try {
+        var url = API_BASE + '/translate?text=' + encodeURIComponent(sendText) + '&inputType=' + encodeURIComponent(inputType);
+        var res = await fetch(url);
+        var data = await res.json();
+        if (data && data.error) {
+          console.error('Translation error:', data.error);
+          return null;
+        }
+        return data;
+      } catch (e) {
+        console.error('Translation failed:', e);
+        return null;
+      }
+    }
+
+    function handleFileSelect() {
+      const file = document.getElementById('imageInput').files[0];
+      const fileLabel = document.getElementById('fileLabel');
+      const extractBtn = document.getElementById('extractBtn');
+      
+      if (file) {
+        fileLabel.innerHTML = `<i class="fas fa-check mr-2"></i>${file.name}`;
+        extractBtn.disabled = false;
+        extractBtn.innerHTML = '<i class="fas fa-magic mr-3"></i>Extract Kanji';
+      } else {
+        fileLabel.innerHTML = 'Choose Image File';
+        extractBtn.disabled = true;
+      }
+    }
+
+    function showLoadingState() {
+      const extractBtn = document.getElementById('extractBtn');
+      extractBtn.disabled = true;
+      extractBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-3"></i>Processing...';
+    }
+
+    function resetButtonState() {
+      const extractBtn = document.getElementById('extractBtn');
+      extractBtn.disabled = false;
+      extractBtn.innerHTML = '<i class="fas fa-magic mr-3"></i>Extract Kanji';
+    }
+
+    function showAlert(message, type = 'error') {
+      const alertClass = type === 'error' ? 'from-red-500 to-red-600' : 'from-green-500 to-green-600';
+      const iconClass = type === 'error' ? 'fa-exclamation-triangle' : 'fa-check-circle';
+      
+      const alertHtml = `
+        <div class="bg-gradient-to-r ${alertClass} text-white p-4 rounded-xl shadow-lg mb-6">
+          <div class="flex items-center">
+            <i class="fas ${iconClass} mr-3 text-lg"></i>
+            <span class="font-medium">${message}</span>
+          </div>
+        </div>
+      `;
+      
+      document.getElementById('output').innerHTML = alertHtml + document.getElementById('output').innerHTML;
+    }
+
+    async function processImage() {
+      const fileInput = document.getElementById('imageInput');
+      const file = fileInput && fileInput.files && fileInput.files[0];
+      
+      if (!file) {
+        showAlert("Please upload an image first!");
+        return;
+      }
+
+      showLoadingState();
+
+      // Show processing status
+      document.getElementById("output").innerHTML = `
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 text-center">
+          <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-full mb-4">
+            <i class="fas fa-cog fa-spin text-2xl text-blue-600"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-gray-900 mb-2">Processing Image</h3>
+          <p class="text-gray-600">Extracting text using AI-powered OCR...</p>
+          <div class="mt-4">
+            <div class="bg-gray-200 rounded-full h-2 overflow-hidden">
+              <div class="bg-gradient-to-r from-blue-600 to-indigo-600 h-2 rounded-full animate-pulse"></div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      try {
+        // OCR
+        const { data: { text } } = await Tesseract.recognize(file, 'jpn');
+        console.log('Extracted text:', text);
+        
+        // Translate the extracted text
+        let translationData = null;
+        if (text && text.trim()) {
+          try {
+            translationData = await translateText(text, 'japanese');
+            console.log('Translation data:', translationData);
+          } catch (e) {
+            console.error('Translation failed:', e);
+          }
+        }
+        
+        // Show extracted text with translation
+        let translationHtml = '';
+        if (translationData) {
+          translationHtml = `
+            <div class="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <h4 class="text-sm font-semibold text-blue-800 mb-2 flex items-center">
+                <i class="fas fa-language mr-2"></i>
+                Translation
+              </h4>
+              <div class="space-y-2">
+                <div>
+                  <span class="text-xs text-blue-600 font-medium">Romanji:</span>
+                  <p class="text-blue-800">${translationData.romanized || 'N/A'}</p>
+                </div>
+                <div>
+                  <span class="text-xs text-blue-600 font-medium">English:</span>
+                  <p class="text-blue-800">${translationData.translated || 'N/A'}</p>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+        
+        document.getElementById("output").innerHTML = `
+          <div class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 mb-6">
+            <div class="flex items-center mb-4">
+              <div class="bg-gradient-to-r from-green-100 to-emerald-100 p-2 rounded-lg mr-3">
+                <i class="fas fa-file-text text-green-600 text-lg"></i>
+              </div>
+              <h3 class="text-xl font-semibold text-gray-900">Extracted Text</h3>
+            </div>
+            <div class="bg-gray-50 rounded-xl p-4 kanji-font">
+              <p class="text-gray-800 text-lg leading-relaxed">${text || 'No text extracted'}</p>
+              ${translationHtml}
+            </div>
+          </div>
+        `;
+
+        // Extract unique Kanji
+        const kanjis = [...new Set(text.match(/[\u4e00-\u9faf]/g))];
+        if (!kanjis || kanjis.length === 0) {
+          document.getElementById("output").innerHTML += `
+            <div class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6">
+              <div class="text-center">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-yellow-100 to-orange-100 rounded-full mb-4">
+                  <i class="fas fa-search text-2xl text-yellow-600"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-gray-900 mb-2">No Kanji Found</h3>
+                <p class="text-gray-600">The image doesn't seem to contain any Japanese kanji characters.</p>
+              </div>
+            </div>
+          `;
+          resetButtonState();
+          return;
+        }
+
+        // Show kanji count and start processing
+        document.getElementById("output").innerHTML += `
+          <div class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+              <div class="flex items-center">
+                <div class="bg-gradient-to-r from-purple-100 to-violet-100 p-2 rounded-lg mr-3">
+                  <i class="fas fa-language text-purple-600 text-lg"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-gray-900">Kanji Analysis</h3>
+              </div>
+              <span class="bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                ${kanjis.length} character${kanjis.length !== 1 ? 's' : ''} found
+              </span>
+            </div>
+            <div class="grid grid-cols-1 gap-4" id="kanjiResults">
+              <!-- Kanji cards will be inserted here -->
+            </div>
+          </div>
+        `;
+
+        const kanjiResults = document.getElementById('kanjiResults');
+        
+        // Fetch Kanji details
+        for (const kanji of kanjis) {
+          try {
+            const res = await fetch(`https://kanjiapi.dev/v1/kanji/${encodeURIComponent(kanji)}`);
+            if (!res.ok) continue;
+            const data = await res.json();
+
+            // Convert readings to Romaji
+            const onRomaji = data.on_readings.map(r => window.wanakana.toRomaji(r));
+            const kunRomaji = data.kun_readings.map(r => window.wanakana.toRomaji(r));
+
+            const gradeDisplay = data.grade ? `Grade ${data.grade}` : 'Advanced';
+            const gradeColor = data.grade && data.grade <= 6 ? 'text-green-600 bg-green-100' : 'text-purple-600 bg-purple-100';
+
+            kanjiResults.innerHTML += `
+              <div class="bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl p-6 border border-slate-200 hover:shadow-lg transition-all duration-200">
+                <div class="flex items-start justify-between mb-4">
+                  <div class="kanji-font text-4xl font-bold text-gray-900 bg-white p-3 rounded-xl shadow-sm">
+                    ${data.kanji}
+                  </div>
+                  <div class="flex space-x-2">
+                    <span class="${gradeColor} px-2 py-1 rounded-full text-xs font-medium">
+                      ${gradeDisplay}
+                    </span>
+                    <span class="text-slate-600 bg-slate-100 px-2 py-1 rounded-full text-xs font-medium">
+                      ${data.stroke_count} strokes
+                    </span>
+                  </div>
+                </div>
+                
+                <div class="space-y-3">
+                  <div class="bg-white rounded-lg p-3">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                      <i class="fas fa-globe-americas mr-2 text-blue-500"></i>
+                      Meanings
+                    </h4>
+                    <p class="text-gray-800 font-medium">${data.meanings.join(', ')}</p>
+                  </div>
+                  
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div class="bg-white rounded-lg p-3">
+                      <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                        <i class="fas fa-yin-yang mr-2 text-red-500"></i>
+                        On'yomi
+                      </h4>
+                      <p class="kanji-font text-gray-800 mb-1">${data.on_readings.join(', ') || "N/A"}</p>
+                      <p class="text-sm text-gray-600 italic">${onRomaji.join(', ') || "N/A"}</p>
+                    </div>
+                    
+                    <div class="bg-white rounded-lg p-3">
+                      <h4 class="text-sm font-semibold text-gray-700 mb-2 flex items-center">
+                        <i class="fas fa-yin-yang mr-2 text-indigo-500"></i>
+                        Kun'yomi
+                      </h4>
+                      <p class="kanji-font text-gray-800 mb-1">${data.kun_readings.join(', ') || "N/A"}</p>
+                      <p class="text-sm text-gray-600 italic">${kunRomaji.join(', ') || "N/A"}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          } catch (err) {
+            console.error('Error processing kanji:', kanji, err);
+          }
+        }
+        
+        resetButtonState();
+        
+      } catch (err) {
+        console.error('OCR Error:', err);
+        showAlert('Failed to process the image. Please try again with a clearer image.');
+        resetButtonState();
+      }
+    }
+    
+    // Initialize event listeners when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      const imageInput = document.getElementById('imageInput');
+      if (imageInput) {
+        imageInput.addEventListener('change', handleFileSelect);
+      }
+    });
+  </script>
+</body>
+</html>
